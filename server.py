@@ -8,58 +8,63 @@ class ChatServer:
         self.rooms = {}
 
     async def handle_client(self, reader, writer):
-        addr = writer.get_extra_info('peername')
-        logging.info(f"Connected: {addr}")
-
-        writer.write("Enter room name: ".encode())
-        await writer.drain()
-        room_name = (await reader.readline()).decode().strip()
-
-        if room_name not in self.rooms:
-            self.rooms[room_name] = {'clients': [], 'queue': asyncio.Queue()}
-            asyncio.create_task(self.distribute_messages(room_name))
-
-        self.rooms[room_name]['clients'].append(writer)
-        logging.info(f"{addr} joined room {room_name}")
-
         try:
-            while True:
-                data = await reader.readline()
-                if not data:
-                    break
-                message = data.decode().strip()
-                logging.info(f"Received message from {addr} in {room_name}: {message}")
+            addr = writer.get_extra_info('peername')
+            logging.info(f"New connection from {addr}")
 
-                await self.rooms[room_name]['queue'].put((addr, message))
-        except asyncio.CancelledError:
-            pass
+            writer.write("Enter room name: ".encode())
+            await writer.drain()
+            room_name = (await reader.read(100)).decode().strip()
+
+            if room_name not in self.rooms:
+                self.rooms[room_name] = {'clients': []}
+            self.rooms[room_name]['clients'].append(writer)
+
+            logging.info(f"{addr} joined room {room_name}")
+
+            while True:
+                try:
+                    data = await reader.readline()
+                    if not data:
+                        logging.info(f"{addr} disconnected.")
+                        break
+
+                    message = data.decode().strip()
+                    logging.info(f"Received message from {addr} in {room_name}: {message}")
+
+                    for client in self.rooms[room_name]['clients']:
+                        if client != writer:
+                            try:
+                                client.write(f"{addr}: {message}\n".encode())
+                                await client.drain()
+                            except Exception as e:
+                                logging.error(f"Error sending message to {client.get_extra_info('peername')}: {e}")
+                except asyncio.CancelledError:
+                    logging.info(f"Task for {addr} was cancelled")
+                    break
+                except Exception as e:
+                    logging.error(f"Error reading data from {addr}: {e}")
+                    break
+
+        except Exception as e:
+            logging.error(f"Error handling client {addr}: {e}")
         finally:
-            logging.info(f"Disconnecting {addr}")
-            self.rooms[room_name]['clients'].remove(writer)
+            for room in self.rooms.values():
+                if writer in room['clients']:
+                    room['clients'].remove(writer)
+
             writer.close()
             await writer.wait_closed()
+            logging.info(f"Closed connection with {addr}")
 
-    async def distribute_messages(self, room_name):
-        """Асинхронно рассылает сообщения всем клиентам в комнате, кроме отправителя"""
-        while True:
-            addr, message = await self.rooms[room_name]['queue'].get()
-            logging.info(f"Distributing message from {addr} to room {room_name}: {message}")
-
-            for client in self.rooms[room_name]['clients']:
-                try:
-                    if client.get_extra_info('peername') != addr:
-                        client.write(f"{addr}: {message}\n".encode())
-                        await client.drain()
-                        logging.info(f"Message sent to client {client.get_extra_info('peername')}: {message}")
-                except Exception as e:
-                    logging.error(f"Error sending message to client: {e}")
-
-    async def start_server(self, host='127.0.0.1', port=8888):
-        server = await asyncio.start_server(self.handle_client, host, port)
-        logging.info(f"Server started on {host}:{port}")
+    async def start_server(self):
+        server = await asyncio.start_server(
+            self.handle_client, '127.0.0.1', 8888)
+        addr = server.sockets[0].getsockname()
+        logging.info(f"Server started on {addr}")
         async with server:
             await server.serve_forever()
 
 if __name__ == '__main__':
-    chat_server = ChatServer()
-    asyncio.run(chat_server.start_server())
+    server = ChatServer()
+    asyncio.run(server.start_server())

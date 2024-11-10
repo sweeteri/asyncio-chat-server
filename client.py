@@ -12,6 +12,9 @@ async def handle_messages(reader):
             else:
                 print("Server closed the connection.")
                 break
+        except asyncio.CancelledError:
+            print("Message handling task was cancelled.")
+            break
         except Exception as e:
             print(f"Error receiving message: {e}")
             break
@@ -53,6 +56,8 @@ async def main():
         writer.close()
         await writer.wait_closed()
 
+    except ConnectionRefusedError:
+        print("Connection refused. Please check if the server is running.")
     except Exception as e:
         print(f"Connection error: {e}")
 
