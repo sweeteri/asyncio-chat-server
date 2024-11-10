@@ -25,11 +25,19 @@ async def send_messages(writer):
     while True:
         try:
             message = await asyncio.to_thread(input, "Enter your message (type 'exit' to quit): ")
+
             if message.lower() == 'exit':
                 print("Exiting chat.")
                 break
-            writer.write((message + '\n').encode())
-            await writer.drain()
+
+            # Если сообщение начинается с /private, отправляем личное сообщение
+            if message.startswith('/private'):
+                writer.write((message + '\n').encode())
+                await writer.drain()
+            else:
+                writer.write((message + '\n').encode())
+                await writer.drain()
+
         except Exception as e:
             print(f"Error sending message: {e}")
             break
@@ -40,6 +48,14 @@ async def main():
         reader, writer = await asyncio.open_connection('127.0.0.1', 8888)
         addr = writer.get_extra_info('peername')
         print(f"Connected to server as {addr}")
+
+        # Ожидаем запроса на имя
+        data = await reader.read(100)
+        print(data.decode().strip())
+
+        username = input("Enter your username: ")
+        writer.write((username + '\n').encode())
+        await writer.drain()
 
         data = await reader.read(100)
         print(data.decode().strip())
